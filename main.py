@@ -2,89 +2,87 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import yfinance as yf
-import plotly.graph_objs as go
+from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import MinMaxScaler
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Dense, LSTM, Dropout
+from xgboost import XGBRegressor
+import plotly.graph_objs as go
 
-
-# Function to fetch data for a given stock symbol
+# Function to fetch stock data
 def fetch_stock_data(symbol):
     data = yf.download(symbol, start="2015-01-01")
     return data[['Open', 'High', 'Low', 'Close', 'Volume']]
 
+# Feature engineering for time series forecasting
+def create_features(data):
+    data['Prev Close'] = data['Close'].shift(1)
+    data['Daily Return'] = data['Close'].pct_change()
+    data['5 Day SMA'] = data['Close'].rolling(window=5).mean()
+    data['20 Day SMA'] = data['Close'].rolling(window=20).mean()
+    data.dropna(inplace=True)
+    return data
 
-# Prepare data for the LSTM model
-def prepare_data(df):
-    scaler = MinMaxScaler(feature_range=(0, 1))
-    scaled_data = scaler.fit_transform(df)
+# Prepare data for model
+def prepare_data(data):
+    features = data[['Prev Close', 'Daily Return', '5 Day SMA', '20 Day SMA']]
+    target = data['Close']
+    
+    scaler = MinMaxScaler()
+    scaled_features = scaler.fit_transform(features)
+    
+    X_train, X_test, y_train, y_test = train_test_split(scaled_features, target, test_size=0.2, shuffle=False)
+    return X_train, X_test, y_train, y_test, scaler
 
-    X_train, y_train = [], []
-    for i in range(60, len(scaled_data) - 1):
-        X_train.append(scaled_data[i - 60:i, :])
-        y_train.append(scaled_data[i, 3])
-    X_train, y_train = np.array(X_train), np.array(y_train)
-    return X_train, y_train, scaler
-
-
-# Build the LSTM model
-def build_model(input_shape):
-    model = Sequential()
-    model.add(LSTM(units=50, return_sequences=True, input_shape=input_shape))
-    model.add(Dropout(0.2))
-    model.add(LSTM(units=50, return_sequences=True))
-    model.add(Dropout(0.2))
-    model.add(LSTM(units=50))
-    model.add(Dropout(0.2))
-    model.add(Dense(units=1))
-    model.compile(optimizer='adam', loss='mean_squared_error')
+# Train XGBoost model
+def train_model(X_train, y_train):
+    model = XGBRegressor(objective='reg:squarederror', n_estimators=100, learning_rate=0.1)
+    model.fit(X_train, y_train)
     return model
 
+# Predict the next day price
+def predict_next_day(model, last_data, scaler):
+    last_data_scaled = scaler.transform([last_data])
+    return model.predict(last_data_scaled)[0]
 
-# Predict the next day's closing price
-def predict_next_day(model, recent_data, scaler):
-    scaled_data = scaler.transform(recent_data)
-    X_test = np.array([scaled_data[-60:]])
-    prediction = model.predict(X_test)
-    return scaler.inverse_transform(np.concatenate((np.zeros((1, 4)), prediction), axis=1))[0, -1]
-
-
-# Streamlit App
+# Streamlit app
 def stock_prediction_tool():
-    st.title("Stock Price Prediction Tool")
+    st.title("Stock Price Prediction Tool (without Keras)")
     symbol = st.text_input("Enter the stock symbol (e.g., AAPL for Apple): ").upper()
-
+    
     if symbol:
         st.write(f"Fetching data for {symbol}...")
         df = fetch_stock_data(symbol)
-
-        # Display Historical Data
+        
+        # Display historical data
         st.write(f"Historical Close Prices for {symbol}")
         fig = go.Figure()
         fig.add_trace(go.Scatter(x=df.index, y=df['Close'], mode='lines', name=f'{symbol} Historical Close Price'))
         fig.update_layout(title=f'{symbol} Stock Price History', xaxis_title='Date', yaxis_title='Close Price')
         st.plotly_chart(fig)
+        
+        # Feature engineering and prepare data
+        df = create_features(df)
+        X_train, X_test, y_train, y_test, scaler = prepare_data(df)
 
-        # Prepare data and train the model
-        X_train, y_train, scaler = prepare_data(df)
-        model = build_model((X_train.shape[1], X_train.shape[2]))
-        model.fit(X_train, y_train, epochs=10, batch_size=32, validation_split=0.2)
-
-        # Predict the next day's closing price
-        predicted_price = predict_next_day(model, df.values, scaler)
-        st.write(f"\nThe predicted closing price for {symbol} on the next day is: ${predicted_price:.2f}\n")
-
-        # Generate predictions for the dataset to show comparison
+        # Train model
+        model = train_model(X_train, y_train)
+        
+        # Predict next day price
+        last_data = df[['Prev Close', 'Daily Return', '5 Day SMA', '20 Day SMA']].iloc[-1]
+        predicted_price = predict_next_day(model, last_data, scaler)
+        st.write(f"The predicted closing price for {symbol} on the next day is: ${predicted_price:.2f}")
+        
+        # Add predictions to the DataFrame
         df['Predicted Close'] = np.nan
-        for i in range(60, len(df) - 1):
-            X_test = df[['Open', 'High', 'Low', 'Close', 'Volume']].iloc[i - 60:i].values
-            df['Predicted Close'].iloc[i + 1] = predict_next_day(model, X_test, scaler)
+        df.loc[df.index[-len(X_test):], 'Predicted Close'] = model.predict(X_test)
 
-        # Plot actual vs predicted
+        # Plot predicted vs actual prices
         st.write(f"Predicted vs Actual Close Price for {symbol}")
         fig2 = go.Figure()
         fig2.add_trace(go.Scatter(x=df.index, y=df['Close'], mode='lines', name="Actual Close Price"))
-        fig2.add_trace(go.Scatter(x=df.index, y=df['Predicted Close'], mode='lines', name="Predicted Close Price",
-                                  line=dict(dash='dash')))
+        fig2.add_trace(go.Scatter(x=df.index, y=df['Predicted Close'], mode='lines', name="Predicted Close Price", line=dict(dash='dash')))
         fig2.update_layout(title=f'{symbol} Predicted vs Actual Close Price', xaxis_title='Date', yaxis_title='Price')
+        st.plotly_chart(fig2)
 
+# Run the app
+if __name__ == '__main__':
+    stock_prediction_tool()

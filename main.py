@@ -23,12 +23,24 @@ def create_features(data):
 
 # Prepare data for model
 def prepare_data(data):
+    # Define features and target
     features = data[['Prev Close', 'Daily Return', '5 Day SMA', '20 Day SMA']]
     target = data['Close']
     
+    # Check for NaN or infinite values in features
+    if features.isnull().values.any():
+        st.write("Warning: Found NaN values in features. Filling NaN values with the mean.")
+        features = features.fillna(features.mean())
+
+    if np.isinf(features.values).any():
+        st.write("Warning: Found infinite values in features. Replacing infinite values with finite values.")
+        features = features.replace([np.inf, -np.inf], 0)
+    
+    # Scale features
     scaler = MinMaxScaler()
     scaled_features = scaler.fit_transform(features)
     
+    # Split data
     X_train, X_test, y_train, y_test = train_test_split(scaled_features, target, test_size=0.2, shuffle=False)
     return X_train, X_test, y_train, y_test, scaler
 

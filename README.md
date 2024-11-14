@@ -97,9 +97,6 @@ This project provides an accessible tool to analyze stock price trends using mac
 
 This project is for educational purposes only and does not constitute financial advice. Stock prices are influenced by numerous unpredictable factors, and past performance is not an indicator of future results.
 
-## 📝 License
-
-This project is open-source and available under the [MIT License](LICENSE).
 
 ## 🙏 Acknowledgments
 

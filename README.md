@@ -27,7 +27,7 @@ This project is a **Stock Price Prediction Tool** that uses **machine learning**
 
 1. **Clone the repository**:
    ```bash
-   git clone https://github.com/dhruch/stock-price-prediction-tool.git
+   git clone https://github.com/dhruch/stock-market-prediction-tool.git
    cd stock-price-prediction-tool
    ```
 
